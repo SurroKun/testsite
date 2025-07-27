@@ -1,0 +1,339 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Статистика за ієрархією анкет</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+  <div class="container mx-auto p-6">
+    <h1 class="text-3xl font-bold mb-6 text-center">Статистика за ієрархією анкет</h1>
+
+    <nav class="mb-6">
+      <a href="index.html" class="text-blue-500 hover:underline mr-4">Щоденна статистика</a>
+      <a href="monthly_stats.html" class="text-blue-500 hover:underline mr-4">Місячна статистика</a>
+      <a href="hierarchical_stats.html" class="text-blue-500 hover:underline">Статистика за ієрархією</a>
+    </nav>
+
+    <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+      <h2 class="text-xl font-semibold mb-4">Фільтр за місяцем</h2>
+      <div class="flex flex-col gap-4">
+        <input id="monthFilter" type="month" class="p-2 border rounded">
+        <button onclick="loadHierarchicalStats()" class="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Показати статистику</button>
+      </div>
+    </div>
+
+    <div id="hierarchicalStatsTables" class="bg-white p-6 rounded-lg shadow-md mb-6">
+      <h2 class="text-xl font-semibold mb-4">Місячна статистика за ієрархією анкет</h2>
+      <button onclick="exportToCSV()" class="bg-green-500 text-white p-2 rounded mb-4 hover:bg-green-600">Експортувати статистику в CSV</button>
+    </div>
+  </div>
+
+  <script>
+    function loadHierarchicalStats() {
+      const monthFilter = document.getElementById('monthFilter').value;
+      const workers = JSON.parse(localStorage.getItem('workers')) || [];
+      const places = JSON.parse(localStorage.getItem('places')) || [];
+      const stats = JSON.parse(localStorage.getItem('stats')) || [];
+      const bonusesPenalties = JSON.parse(localStorage.getItem('bonusesPenalties')) || [];
+      const payments = JSON.parse(localStorage.getItem('payments')) || [];
+      const hierarchicalStatsTables = document.getElementById('hierarchicalStatsTables');
+      hierarchicalStatsTables.innerHTML = '<h2 class="text-xl font-semibold mb-4">Місячна статистика за ієрархією анкет</h2>';
+      hierarchicalStatsTables.innerHTML += '<button onclick="exportToCSV()" class="bg-green-500 text-white p-2 rounded mb-4 hover:bg-green-600">Експортувати статистику в CSV</button>';
+
+      if (places.length === 0 || stats.length === 0) {
+        hierarchicalStatsTables.innerHTML += '<p class="text-red-500">Немає даних для відображення. Додайте анкети та статистику в щоденній статистиці.</p>';
+        return;
+      }
+
+      const mainPlaces = places.filter(place => place.parentPlaceIndex === undefined || place.parentPlaceIndex === '');
+      if (mainPlaces.length === 0) {
+        hierarchicalStatsTables.innerHTML += '<p class="text-red-500">Немає головних анкет для відображення.</p>';
+        return;
+      }
+
+      mainPlaces.forEach(mainPlace => {
+        const mainPlaceIndex = places.indexOf(mainPlace);
+        const childPlaces = places.filter(place => place.parentPlaceIndex === mainPlaceIndex);
+        const placeIndices = [mainPlaceIndex, ...childPlaces.map(place => places.indexOf(place))];
+        const tableContainer = document.createElement('div');
+        tableContainer.className = 'mb-6';
+        tableContainer.innerHTML = `<h3 class="text-lg font-semibold mb-2">Анкета: ${mainPlace.name} (План продажів: ${parseFloat(mainPlace.salesPlan) || 0} ₴)</h3>`;
+        const table = document.createElement('table');
+        table.className = 'w-full border-collapse';
+        const thead = document.createElement('thead');
+        const tbody = document.createElement('tbody');
+
+        let headerRow = `
+          <tr class="bg-gray-200">
+            <th class="p-2 border">Місяць</th>
+            <th class="p-2 border">Анкета</th>
+            <th class="p-2 border">Грязний заробіток (₴)</th>
+            <th class="p-2 border">Заробіток обслуговуючого персоналу (₴)</th>
+            <th class="p-2 border">Комісія Сарафан (₴)</th>
+            <th class="p-2 border">Додаткова комісія (₴)</th>
+            <th class="p-2 border">Чистий заробіток робітників (₴)</th>
+            <th class="p-2 border">Премія за стаж (₴)</th>
+            <th class="p-2 border">Заробіток адміністраторів (₴)</th>
+            <th class="p-2 border">Штрафи адміністраторам (₴)</th>
+            <th class="p-2 border">Заробіток власників (₴)</th>
+            <th class="p-2 border">Видана зарплата робітникам (₴)</th>
+            <th class="p-2 border">Видана зарплата адміністраторам (₴)</th>
+            <th class="p-2 border">Залишок робітникам (₴)</th>
+          </tr>`;
+        thead.innerHTML = headerRow;
+
+        const monthYears = [...new Set(stats.map(stat => stat.date.slice(0, 7)))].sort();
+        monthYears.forEach(monthYear => {
+          if (monthFilter && monthYear !== monthFilter) return;
+
+          const placeStats = stats.filter(stat => placeIndices.includes(stat.placeIndex) && stat.date.startsWith(monthYear));
+          if (placeStats.length === 0) return;
+
+          const totalGross = placeStats.reduce((sum, stat) => sum + (parseFloat(stat.grossIncome) || 0), 0).toFixed(2);
+          const serviceIncome = placeIndices.reduce((sum, idx) => {
+            const place = places[idx];
+            const statsForPlace = placeStats.filter(stat => stat.placeIndex === idx);
+            const totalGrossForPlan = statsForPlace.reduce((sum, stat) => sum + (parseFloat(stat.grossIncome) || 0), 0);
+            const isPlanMet = totalGrossForPlan >= (parseFloat(place.salesPlan) || 0);
+            const extraNetPercentage = isPlanMet ? 2 : 0;
+            let placeServiceIncome = statsForPlace.reduce((s, stat) => s + (parseFloat(stat.grossIncome) || 0) * (parseFloat(place.servicePercentage) || 0) / 100, 0);
+            if (isPlanMet && place.isPlanPercentageFromService) {
+              const extraNet = statsForPlace.reduce((s, stat) => s + (parseFloat(stat.grossIncome) || 0) * extraNetPercentage / 100, 0);
+              placeServiceIncome -= extraNet;
+            }
+            return sum + placeServiceIncome;
+          }, 0).toFixed(2);
+          const sarafanIncome = placeIndices.reduce((sum, idx) => {
+            const place = places[idx];
+            const statsForPlace = placeStats.filter(stat => stat.placeIndex === idx);
+            return sum + statsForPlace.reduce((s, stat) => s + (parseFloat(stat.grossIncome) || 0) * (parseFloat(place.sarafanPercentage) || 0) / 100, 0);
+          }, 0).toFixed(2);
+          const extraCommissionIncome = placeIndices.reduce((sum, idx) => {
+            const place = places[idx];
+            const statsForPlace = placeStats.filter(stat => stat.placeIndex === idx);
+            return sum + statsForPlace.reduce((s, stat) => s + (parseFloat(stat.grossIncome) || 0) * (parseFloat(place.extraCommissionPercentage) || 0) / 100, 0);
+          }, 0).toFixed(2);
+          const totalNet = placeIndices.reduce((sum, idx) => {
+            const place = places[idx];
+            const statsForPlace = placeStats.filter(stat => stat.placeIndex === idx);
+            const totalGrossForPlan = statsForPlace.reduce((sum, stat) => sum + (parseFloat(stat.grossIncome) || 0), 0);
+            const isPlanMet = totalGrossForPlan >= (parseFloat(place.salesPlan) || 0);
+            const baseNetPercentage = 23;
+            const extraNetPercentage = isPlanMet ? 2 : 0;
+            let placeNet = statsForPlace.reduce((s, stat) => s + (parseFloat(stat.grossIncome) || 0) * baseNetPercentage / 100, 0);
+            if (!place.isPlanPercentageFromService) {
+              placeNet += statsForPlace.reduce((s, stat) => s + (parseFloat(stat.grossIncome) || 0) * extraNetPercentage / 100, 0);
+            }
+            return sum + placeNet;
+          }, 0).toFixed(2);
+          const totalSeniorityBonus = placeStats.reduce((sum, stat) => {
+            const worker = workers[stat.workerIndex] || { seniorityBonusPercentage: 0 };
+            return sum + ((parseFloat(stat.grossIncome) || 0) * (parseFloat(worker.seniorityBonusPercentage) || 0) / 100);
+          }, 0).toFixed(2);
+          const adminPenalties = placeIndices.reduce((sum, idx) => {
+            const place = places[idx];
+            const admin = place.admin;
+            return sum + (bonusesPenalties
+              .filter(bp => bp.type === 'admin' && bp.admin === admin && bp.month === monthYear)
+              .reduce((s, bp) => s + (parseFloat(bp.penalty) || 0), 0));
+          }, 0).toFixed(2);
+          const adminIncome = placeIndices.reduce((sum, idx) => {
+            const place = places[idx];
+            const statsForPlace = placeStats.filter(stat => stat.placeIndex === idx);
+            const placeGross = statsForPlace.reduce((s, stat) => s + (parseFloat(stat.grossIncome) || 0), 0);
+            const admin = place.admin;
+            const placeAdminPenalties = bonusesPenalties
+              .filter(bp => bp.type === 'admin' && bp.admin === admin && bp.month === monthYear)
+              .reduce((s, bp) => s + (parseFloat(bp.penalty) || 0), 0);
+            return sum + Math.max(0, placeGross * 0.06 - placeAdminPenalties);
+          }, 0).toFixed(2);
+          const workerPayments = payments
+            .filter(p => p.type === 'worker' && placeStats.some(stat => stat.workerIndex === p.workerIndex && stat.date === p.date))
+            .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0).toFixed(2);
+          const adminPayments = payments
+            .filter(p => p.type === 'admin' && placeIndices.some(idx => places[idx].admin === p.admin && p.date.startsWith(monthYear)))
+            .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0).toFixed(2);
+          const workerBalance = (parseFloat(totalNet) + parseFloat(totalSeniorityBonus) - parseFloat(workerPayments)).toFixed(2);
+          const adjustedOwnerIncome = (parseFloat(totalGross) - parseFloat(adminIncome) - parseFloat(serviceIncome) - parseFloat(totalNet) - parseFloat(totalSeniorityBonus) - parseFloat(sarafanIncome) - parseFloat(extraCommissionIncome)).toFixed(2);
+
+          const row = `
+            <tr>
+              <td class="p-2 border">${monthYear}</td>
+              <td class="p-2 border">${mainPlace.name}</td>
+              <td class="p-2 border">${totalGross}</td>
+              <td class="p-2 border">${serviceIncome}</td>
+              <td class="p-2 border">${sarafanIncome}</td>
+              <td class="p-2 border">${extraCommissionIncome}</td>
+              <td class="p-2 border">${totalNet}</td>
+              <td class="p-2 border">${totalSeniorityBonus}</td>
+              <td class="p-2 border">${adminIncome}</td>
+              <td class="p-2 border">${adminPenalties}</td>
+              <td class="p-2 border">${adjustedOwnerIncome}</td>
+              <td class="p-2 border">${workerPayments}</td>
+              <td class="p-2 border">${adminPayments}</td>
+              <td class="p-2 border">${workerBalance}</td>
+            </tr>`;
+          tbody.innerHTML += row;
+        });
+
+        if (tbody.innerHTML === '') {
+          tableContainer.innerHTML += '<p class="text-red-500">Немає даних для цієї анкети за вибраний період.</p>';
+        } else {
+          table.appendChild(thead);
+          table.appendChild(tbody);
+          tableContainer.appendChild(table);
+          hierarchicalStatsTables.appendChild(tableContainer);
+        }
+      });
+    }
+
+    function exportToCSV() {
+      const monthFilter = document.getElementById('monthFilter').value;
+      const workers = JSON.parse(localStorage.getItem('workers')) || [];
+      const places = JSON.parse(localStorage.getItem('places')) || [];
+      const stats = JSON.parse(localStorage.getItem('stats')) || [];
+      const bonusesPenalties = JSON.parse(localStorage.getItem('bonusesPenalties')) || [];
+      const payments = JSON.parse(localStorage.getItem('payments')) || [];
+      let csvContent = 'Місяць,Анкета,Грязний заробіток (₴),Заробіток обслуговуючого персоналу (₴),Комісія Сарафан (₴),Додаткова комісія (₴),Чистий заробіток робітників (₴),Премія за стаж (₴),Заробіток адміністраторів (₴),Штрафи адміністраторам (₴),Заробіток власників (₴),Видана зарплата робітникам (₴),Видана зарплата адміністраторам (₴),Залишок робітникам (₴)\n';
+
+      const mainPlaces = places.filter(place => place.parentPlaceIndex === undefined || place.parentPlaceIndex === '');
+      mainPlaces.forEach(mainPlace => {
+        const mainPlaceIndex = places.indexOf(mainPlace);
+        const childPlaces = places.filter(place => place.parentPlaceIndex === mainPlaceIndex);
+        const placeIndices = [mainPlaceIndex, ...childPlaces.map(place => places.indexOf(place))];
+
+        const monthYears = [...new Set(stats.map(stat => stat.date.slice(0, 7)))].sort();
+        monthYears.forEach(monthYear => {
+          if (monthFilter && monthYear !== monthFilter) return;
+
+          const placeStats = stats.filter(stat => placeIndices.includes(stat.placeIndex) && stat.date.startsWith(monthYear));
+          if (placeStats.length === 0) return;
+
+          const totalGross = placeStats.reduce((sum, stat) => sum + (parseFloat(stat.grossIncome) || 0), 0).toFixed(2);
+          const serviceIncome = placeIndices.reduce((sum, idx) => {
+            const place = places[idx];
+            const statsForPlace = placeStats.filter(stat => stat.placeIndex === idx);
+            const totalGrossForPlan = statsForPlace.reduce((sum, stat) => sum + (parseFloat(stat.grossIncome) || 0), 0);
+            const isPlanMet = totalGrossForPlan >= (parseFloat(place.salesPlan) || 0);
+            const extraNetPercentage = isPlanMet ? 2 : 0;
+            let placeServiceIncome = statsForPlace.reduce((s, stat) => s + (parseFloat(stat.grossIncome) || 0) * (parseFloat(place.servicePercentage) || 0) / 100, 0);
+            if (isPlanMet && place.isPlanPercentageFromService) {
+              const extraNet = statsForPlace.reduce((s, stat) => s + (parseFloat(stat.grossIncome) || 0) * extraNetPercentage / 100, 0);
+              placeServiceIncome -= extraNet;
+            }
+            return sum + placeServiceIncome;
+          }, 0).toFixed(2);
+          const sarafanIncome = placeIndices.reduce((sum, idx) => {
+            const place = places[idx];
+            const statsForPlace = placeStats.filter(stat => stat.placeIndex === idx);
+            return sum + statsForPlace.reduce((s, stat) => s + (parseFloat(stat.grossIncome) || 0) * (parseFloat(place.sarafanPercentage) || 0) / 100, 0);
+          }, 0).toFixed(2);
+          const extraCommissionIncome = placeIndices.reduce((sum, idx) => {
+            const place = places[idx];
+            const statsForPlace = placeStats.filter(stat => stat.placeIndex === idx);
+            return sum + statsForPlace.reduce((s, stat) => s + (parseFloat(stat.grossIncome) || 0) * (parseFloat(place.extraCommissionPercentage) || 0) / 100, 0);
+          }, 0).toFixed(2);
+          const totalNet = placeIndices.reduce((sum, idx) => {
+            const place = places[idx];
+            const statsForPlace = placeStats.filter(stat => stat.placeIndex === idx);
+            const totalGrossForPlan = statsForPlace.reduce((sum, stat) => sum + (parseFloat(stat.grossIncome) || 0), 0);
+            const isPlanMet = totalGrossForPlan >= (parseFloat(place.salesPlan) || 0);
+            const baseNetPercentage = 23;
+            const extraNetPercentage = isPlanMet ? 2 : 0;
+            let placeNet = statsForPlace.reduce((s, stat) => s + (parseFloat(stat.grossIncome) || 0) * baseNetPercentage / 100, 0);
+            if (!place.isPlanPercentageFromService) {
+              placeNet += statsForPlace.reduce((s, stat) => s + (parseFloat(stat.grossIncome) || 0) * extraNetPercentage / 100, 0);
+            }
+            return sum + placeNet;
+          }, 0).toFixed(2);
+          const totalSeniorityBonus = placeStats.reduce((sum, stat) => {
+            const worker = workers[stat.workerIndex] || { seniorityBonusPercentage: 0 };
+            return sum + ((parseFloat(stat.grossIncome) || 0) * (parseFloat(worker.seniorityBonusPercentage) || 0) / 100);
+          }, 0).toFixed(2);
+          const adminPenalties = placeIndices.reduce((sum, idx) => {
+            const place = places[idx];
+            const admin = place.admin;
+            return sum + (bonusesPenalties
+              .filter(bp => bp.type === 'admin' && bp.admin === admin && bp.month === monthYear)
+              .reduce((s, bp) => s + (parseFloat(bp.penalty) || 0), 0));
+          }, 0).toFixed(2);
+          const adminIncome = placeIndices.reduce((sum, idx) => {
+            const place = places[idx];
+            const statsForPlace = placeStats.filter(stat => stat.placeIndex === idx);
+            const placeGross = statsForPlace.reduce((s, stat) => s + (parseFloat(stat.grossIncome) || 0), 0);
+            const admin = place.admin;
+            const placeAdminPenalties = bonusesPenalties
+              .filter(bp => bp.type === 'admin' && bp.admin === admin && bp.month === monthYear)
+              .reduce((s, bp) => s + (parseFloat(bp.penalty) || 0), 0);
+            return sum + Math.max(0, placeGross * 0.06 - placeAdminPenalties);
+          }, 0).toFixed(2);
+          const workerPayments = payments
+            .filter(p => p.type === 'worker' && placeStats.some(stat => stat.workerIndex === p.workerIndex && stat.date === p.date))
+            .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0).toFixed(2);
+          const adminPayments = payments
+            .filter(p => p.type === 'admin' && placeIndices.some(idx => places[idx].admin === p.admin && p.date.startsWith(monthYear)))
+            .reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0).toFixed(2);
+          const workerBalance = (parseFloat(totalNet) + parseFloat(totalSeniorityBonus) - parseFloat(workerPayments)).toFixed(2);
+          const adjustedOwnerIncome = (parseFloat(totalGross) - parseFloat(adminIncome) - parseFloat(serviceIncome) - parseFloat(totalNet) - parseFloat(totalSeniorityBonus) - parseFloat(sarafanIncome) - parseFloat(extraCommissionIncome)).toFixed(2);
+
+          csvContent += `${monthYear},${mainPlace.name},${totalGross},${serviceIncome},${sarafanIncome},${extraCommissionIncome},${totalNet},${totalSeniorityBonus},${adminIncome},${adminPenalties},${adjustedOwnerIncome},${workerPayments},${adminPayments},${workerBalance}\n`;
+        });
+      });
+
+      if (csvContent.split('\n').length <= 1) {
+        alert('Немає даних для експорту за вибраний період.');
+        return;
+      }
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `hierarchical_stats${monthFilter ? '_' + monthFilter : ''}.csv`;
+      link.click();
+    }
+
+    loadHierarchicalStats();
+  </script>
+</body>
+</html>
