@@ -1,0 +1,738 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Система ведення статистики робітників</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+  <div class="container mx-auto p-6">
+    <h1 class="text-3xl font-bold mb-6 text-center">Система ведення статистики робітників</h1>
+
+    <nav class="mb-6">
+      <a href="index.html" class="text-blue-500 hover:underline mr-4">Щоденна статистика</a>
+      <a href="monthly_stats.html" class="text-blue-500 hover:underline">Місячна статистика</a>
+    </nav>
+
+    <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+      <h2 class="text-xl font-semibold mb-4">Додати нового робітника</h2>
+      <div class="flex flex-col gap-4">
+        <input id="workerName" type="text" placeholder="Ім'я робітника" class="p-2 border rounded">
+        <input id="seniorityBonusPercentage" type="number" placeholder="Премія за стаж (%)" class="p-2 border rounded" min="0" max="100">
+        <button onclick="addWorker()" class="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Додати робітника</button>
+      </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+      <h2 class="text-xl font-semibold mb-4">Додати нову анкету (робоче місце)</h2>
+      <div class="flex flex-col gap-4">
+        <input id="placeName" type="text" placeholder="Назва анкети" class="p-2 border rounded">
+        <select id="adminSelect" class="p-2 border rounded">
+          <option value="">Оберіть адміністратора</option>
+          <option value="Адмін 1">Адмін 1</option>
+          <option value="Адмін 2">Адмін 2</option>
+          <option value="Адмін 3">Адмін 3</option>
+        </select>
+        <input id="servicePercentage" type="number" placeholder="Відсоток для обслуговуючого персоналу (%)" class="p-2 border rounded" min="0" max="100">
+        <input id="salesPlan" type="number" placeholder="План продажів (₴)" class="p-2 border rounded" min="0">
+        <button onclick="addPlace()" class="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Додати анкету</button>
+      </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+      <h2 class="text-xl font-semibold mb-4">Додати статистику за день</h2>
+      <div class="flex flex-col gap-4">
+        <select id="workerSelect" class="p-2 border rounded">
+          <option value="">Оберіть робітника</option>
+        </select>
+        <select id="placeSelect" class="p-2 border rounded">
+          <option value="">Оберіть анкету</option>
+        </select>
+        <input id="statsDate" type="date" class="p-2 border rounded">
+        <input id="grossIncome" type="number" placeholder="Грязний заробіток в день (₴)" class="p-2 border rounded" min="0">
+        <button onclick="addStats()" class="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Додати статистику</button>
+      </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+      <h2 class="text-xl font-semibold mb-4">Нарахувати премію/штраф працівнику</h2>
+      <div class="flex flex-col gap-4">
+        <select id="bonusPenaltyWorkerSelect" class="p-2 border rounded">
+          <option value="">Оберіть робітника</option>
+        </select>
+        <input id="bonusPenaltyDate" type="date" class="p-2 border rounded">
+        <input id="workerBonus" type="number" placeholder="Премія працівника (₴)" class="p-2 border rounded" min="0">
+        <input id="workerPenalty" type="number" placeholder="Штраф працівника (₴)" class="p-2 border rounded" min="0">
+        <button onclick="addWorkerBonusPenalty()" class="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Нарахувати</button>
+      </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+      <h2 class="text-xl font-semibold mb-4">Нарахувати штраф адміністратору</h2>
+      <div class="flex flex-col gap-4">
+        <select id="adminPenaltySelect" class="p-2 border rounded">
+          <option value="">Оберіть адміністратора</option>
+          <option value="Адмін 1">Адмін 1</option>
+          <option value="Адмін 2">Адмін 2</option>
+          <option value="Адмін 3">Адмін 3</option>
+        </select>
+        <input id="adminPenaltyDate" type="date" class="p-2 border rounded">
+        <input id="adminPenaltyAmount" type="number" placeholder="Штраф адміністратора (₴)" class="p-2 border rounded" min="0">
+        <button onclick="addAdminPenalty()" class="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Нарахувати</button>
+      </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+      <h2 class="text-xl font-semibold mb-4">Внести видану заробітну плату</h2>
+      <div class="flex flex-col gap-4">
+        <select id="paymentWorkerSelect" class="p-2 border rounded">
+          <option value="">Оберіть робітника</option>
+        </select>
+        <select id="paymentAdminSelect" class="p-2 border rounded">
+          <option value="">Оберіть адміністратора</option>
+          <option value="Адмін 1">Адмін 1</option>
+          <option value="Адмін 2">Адмін 2</option>
+          <option value="Адмін 3">Адмін 3</option>
+        </select>
+        <input id="paymentDate" type="date" class="p-2 border rounded">
+        <input id="paymentAmount" type="number" placeholder="Сума виданої зарплати (₴)" class="p-2 border rounded" min="0">
+        <button onclick="addPayment()" class="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Внести зарплату</button>
+      </div>
+    </div>
+
+    <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+      <h2 class="text-xl font-semibold mb-4">Список робітників</h2>
+      <table class="w-full border-collapse">
+        <thead>
+          <tr class="bg-gray-200">
+            <th class="p-2 border">ID</th>
+            <th class="p-2 border">Ім'я</th>
+            <th class="p-2 border">Премія за стаж (%)</th>
+            <th class="p-2 border">Дії</th>
+          </tr>
+        </thead>
+        <tbody id="workersTable"></tbody>
+      </table>
+    </div>
+
+    <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+      <h2 class="text-xl font-semibold mb-4">Список анкет (робочих місць)</h2>
+      <table class="w-full border-collapse">
+        <thead>
+          <tr class="bg-gray-200">
+            <th class="p-2 border">ID</th>
+            <th class="p-2 border">Назва</th>
+            <th class="p-2 border">Адміністратор</th>
+            <th class="p-2 border">Відсоток обслуговуючого персоналу (%)</th>
+            <th class="p-2 border">План продажів (₴)</th>
+            <th class="p-2 border">Дії</th>
+          </tr>
+        </thead>
+        <tbody id="placesTable"></tbody>
+      </table>
+    </div>
+
+    <div id="statsTables" class="bg-white p-6 rounded-lg shadow-md mb-6">
+      <h2 class="text-xl font-semibold mb-4">Щоденна статистика за анкетами</h2>
+      <button onclick="exportToCSV()" class="bg-green-500 text-white p-2 rounded mb-4 hover:bg-green-600">Експортувати щоденну статистику в CSV</button>
+    </div>
+
+    <div id="editWorkerModal" class="fixed inset-0 bg-gray-500 bg-opacity-50 hidden flex items-center justify-center">
+      <div class="bg-white p-6 rounded-lg shadow-md w-96">
+        <h2 class="text-xl font-semibold mb-4">Редагувати робітника</h2>
+        <div class="flex flex-col gap-4">
+          <input id="editWorkerName" type="text" placeholder="Ім'я робітника" class="p-2 border rounded">
+          <input id="editSeniorityBonusPercentage" type="number" placeholder="Премія за стаж (%)" class="p-2 border rounded" min="0" max="100">
+          <div class="flex gap-2">
+            <button onclick="saveWorker()" class="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Зберегти</button>
+            <button onclick="closeModal('editWorkerModal')" class="bg-gray-500 text-white p-2 rounded hover:bg-gray-600">Скасувати</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="editStatsModal" class="fixed inset-0 bg-gray-500 bg-opacity-50 hidden flex items-center justify-center">
+      <div class="bg-white p-6 rounded-lg shadow-md w-96">
+        <h2 class="text-xl font-semibold mb-4">Редагувати статистику</h2>
+        <div class="flex flex-col gap-4">
+          <select id="editWorkerSelect" class="p-2 border rounded">
+            <option value="">Оберіть робітника</option>
+          </select>
+          <select id="editPlaceSelect" class="p-2 border rounded">
+            <option value="">Оберіть анкету</option>
+          </select>
+          <input id="editStatsDate" type="date" class="p-2 border rounded">
+          <input id="editGrossIncome" type="number" placeholder="Грязний заробіток в день (₴)" class="p-2 border rounded" min="0">
+          <div class="flex gap-2">
+            <button onclick="saveStats()" class="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Зберегти</button>
+            <button onclick="closeModal('editStatsModal')" class="bg-gray-500 text-white p-2 rounded hover:bg-gray-600">Скасувати</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="editPlaceModal" class="fixed inset-0 bg-gray-500 bg-opacity-50 hidden flex items-center justify-center">
+      <div class="bg-white p-6 rounded-lg shadow-md w-96">
+        <h2 class="text-xl font-semibold mb{HCO0DДодати анкету</h2>
+        <div class="flex flex-col gap-4">
+          <input id="editPlaceName" type="text" placeholder="Назва анкети" class="p-2 border rounded">
+          <select id="editAdminSelect" class="p-2 border rounded">
+            <option value="">Оберіть адміністратора</option>
+            <option value="Адмін 1">Адмін 1</option>
+            <option value="Адмін 2">Адмін 2</option>
+            <option value="Адмін 3">Адмін 3</option>
+          </select>
+          <input id="editServicePercentage" type="number" placeholder="Відсоток обслуговуючого персоналу (%)" class="p-2 border rounded" min="0" max="100">
+          <input id="editSalesPlan" type="number" placeholder="План продажів (₴)" class="p-2 border rounded" min="0">
+          <div class="flex gap-2">
+            <button onclick="savePlace()" class="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Зберегти</button>
+            <button onclick="closeModal('editPlaceModal')" class="bg-gray-500 text-white p-2 rounded hover:bg-gray-600">Скасувати</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentWorkerIndex = null;
+    let currentStatIndex = null;
+    let currentPlaceIndex = null;
+
+    function loadData() {
+      const workers = JSON.parse(localStorage.getItem('workers')) || [];
+      const places = JSON.parse(localStorage.getItem('places')) || [];
+      const stats = JSON.parse(localStorage.getItem('stats')) || [];
+      const bonusesPenalties = JSON.parse(localStorage.getItem('bonusesPenalties')) || [];
+      const payments = JSON.parse(localStorage.getItem('payments')) || [];
+
+      const workersTable = document.getElementById('workersTable');
+      workersTable.innerHTML = '';
+      const workerSelect = document.getElementById('workerSelect');
+      workerSelect.innerHTML = '<option value="">Оберіть робітника</option>';
+      const editWorkerSelect = document.getElementById('editWorkerSelect');
+      editWorkerSelect.innerHTML = '<option value="">Оберіть робітника</option>';
+      const bonusPenaltyWorkerSelect = document.getElementById('bonusPenaltyWorkerSelect');
+      bonusPenaltyWorkerSelect.innerHTML = '<option value="">Оберіть робітника</option>';
+      const paymentWorkerSelect = document.getElementById('paymentWorkerSelect');
+      paymentWorkerSelect.innerHTML = '<option value="">Оберіть робітника</option>';
+
+      workers.forEach((worker, index) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td class="p-2 border">${index + 1}</td>
+          <td class="p-2 border">${worker.name}</td>
+          <td class="p-2 border">${worker.seniorityBonusPercentage || 0}</td>
+          <td class="p-2 border">
+            <button onclick="openEditWorkerModal(${index})" class="bg-yellow-500 text-white px-2 py-1 rounded mr-2">Редагувати</button>
+            <button onclick="deleteWorker(${index})" class="bg-red-500 text-white px-2 py-1 rounded">Видалити</button>
+          </td>`;
+        workersTable.appendChild(row);
+
+        const option = document.createElement('option');
+        option.value = index;
+        option.textContent = worker.name;
+        workerSelect.appendChild(option.cloneNode(true));
+        editWorkerSelect.appendChild(option.cloneNode(true));
+        bonusPenaltyWorkerSelect.appendChild(option.cloneNode(true));
+        paymentWorkerSelect.appendChild(option);
+      });
+
+      const placesTable = document.getElementById('placesTable');
+      placesTable.innerHTML = '';
+      const placeSelect = document.getElementById('placeSelect');
+      placeSelect.innerHTML = '<option value="">Оберіть анкету</option>';
+      const editPlaceSelect = document.getElementById('editPlaceSelect');
+      editPlaceSelect.innerHTML = '<option value="">Оберіть анкету</option>';
+
+      places.forEach((place, index) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td class="p-2 border">${index + 1}</td>
+          <td class="p-2 border">${place.name}</td>
+          <td class="p-2 border">${place.admin || 'Немає'}</td>
+          <td class="p-2 border">${place.servicePercentage || 0}</td>
+          <td class="p-2 border">${place.salesPlan || 0}</td>
+          <td class="p-2 border">
+            <button onclick="openEditPlaceModal(${index})" class="bg-yellow-500 text-white px-2 py-1 rounded mr-2">Редагувати</button>
+            <button onclick="deletePlace(${index})" class="bg-red-500 text-white px-2 py-1 rounded">Видалити</button>
+          </td>`;
+        placesTable.appendChild(row);
+
+        const option = document.createElement('option');
+        option.value = index;
+        option.textContent = place.name;
+        placeSelect.appendChild(option.cloneNode(true));
+        editPlaceSelect.appendChild(option);
+      });
+
+      loadStats();
+    }
+
+    function loadStats() {
+      const workers = JSON.parse(localStorage.getItem('workers')) || [];
+      const places = JSON.parse(localStorage.getItem('places')) || [];
+      const stats = JSON.parse(localStorage.getItem('stats')) || [];
+      const payments = JSON.parse(localStorage.getItem('payments')) || [];
+      const statsTables = document.getElementById('statsTables');
+      statsTables.innerHTML = '<h2 class="text-xl font-semibold mb-4">Щоденна статистика за анкетами</h2>';
+      statsTables.innerHTML += '<button onclick="exportToCSV()" class="bg-green-500 text-white p-2 rounded mb-4 hover:bg-green-600">Експортувати щоденну статистику в CSV</button>';
+
+      if (places.length === 0 || stats.length === 0) {
+        statsTables.innerHTML += '<p class="text-red-500">Немає даних для відображення.</p>';
+        return;
+      }
+
+      places.forEach((place, placeIndex) => {
+        const placeStats = stats.filter(stat => stat.placeIndex === placeIndex);
+        const allDates = new Set(placeStats.map(stat => stat.date));
+        const dates = Array.from(allDates).sort();
+        const workerIndices = [...new Set(placeStats.map(stat => stat.workerIndex))];
+        if (workerIndices.length === 0) return;
+
+        // Обчислюємо виконання плану продажів для поточного місяця
+        const totalGrossByMonth = {};
+        placeStats.forEach(stat => {
+          const date = new Date(stat.date);
+          const monthYear = `${date.getFullYear()}-${date.getMonth() + 1}`;
+          totalGrossByMonth[monthYear] = (totalGrossByMonth[monthYear] || 0) + stat.grossIncome;
+        });
+
+        const tableContainer = document.createElement('div');
+        tableContainer.className = 'mb-6';
+        tableContainer.innerHTML = `<h3 class="text-lg font-semibold mb-2">Анкета: ${place.name} (Адмін: ${place.admin || 'Немає'}, Відсоток обслуговуючого персоналу: ${place.servicePercentage || 0}%, План продажів: ${place.salesPlan || 0} ₴)</h3>`;
+        const table = document.createElement('table');
+        table.className = 'w-full border-collapse';
+        const thead = document.createElement('thead');
+        const tbody = document.createElement('tbody');
+
+        let headerRow = '<tr class="bg-gray-200"><th class="p-2 border">Дата</th>';
+        workerIndices.forEach(workerIndex => {
+          const worker = workers[workerIndex] || { name: 'Невідомий' };
+          headerRow += `<th class="p-2 border">${worker.name}</th>`;
+        });
+        headerRow += '</tr>';
+        thead.innerHTML = headerRow;
+
+        dates.forEach(date => {
+          const dateObj = new Date(date);
+          const monthYear = `${dateObj.getFullYear()}-${dateObj.getMonth() + 1}`;
+          const isPlanMet = totalGrossByMonth[monthYear] >= (place.salesPlan || 0);
+          const netPercentage = isPlanMet ? 25 : 23;
+
+          let row = `<tr><td class="p-2 border">${date}</td>`;
+          workerIndices.forEach(workerIndex => {
+            const stat = placeStats.find(s => s.workerIndex === workerIndex && s.date === date);
+            if (stat) {
+              const netIncome = (stat.grossIncome * netPercentage / 100).toFixed(2);
+              const worker = workers[workerIndex] || { name: 'Невідомий', seniorityBonusPercentage: 0 };
+              const seniorityBonus = (stat.grossIncome * (worker.seniorityBonusPercentage || 0) / 100).toFixed(2);
+              const workerPayments = payments
+                .filter(p => p.type === 'worker' && p.workerIndex === workerIndex && p.date === date)
+                .reduce((sum, p) => sum + p.amount, 0).toFixed(2);
+              const workerBalance = (parseFloat(netIncome) + parseFloat(seniorityBonus) - workerPayments).toFixed(2);
+              row += `
+                <td class="p-2 border">
+                  Грязний: ${stat.grossIncome}<br>
+                  Чистий: ${netIncome} (${netPercentage}%)<br>
+                  Премія за стаж: ${seniorityBonus}<br>
+                  Видана зарплата: ${workerPayments}<br>
+                  Залишок: ${workerBalance}
+                  <div>
+                    <button onclick="openEditStatsModal(${stats.indexOf(stat)})" class="bg-yellow-500 text-white px-2 py-1 rounded mt-1 mr-1">Редагувати</button>
+                    <button onclick="deleteStats(${stats.indexOf(stat)})" class="bg-red-500 text-white px-2 py-1 rounded mt-1">Видалити</button>
+                  </div>
+                </td>`;
+            } else {
+              row += '<td class="p-2 border">-</td>';
+            }
+          });
+          row += '</tr>';
+          tbody.innerHTML += row;
+        });
+
+        table.appendChild(thead);
+        table.appendChild(tbody);
+        tableContainer.appendChild(table);
+        statsTables.appendChild(tableContainer);
+      });
+    }
+
+    function addWorker() {
+      const name = document.getElementById('workerName').value.trim();
+      const seniorityBonusPercentage = parseFloat(document.getElementById('seniorityBonusPercentage').value) || 0;
+      if (name && seniorityBonusPercentage >= 0 && seniorityBonusPercentage <= 100) {
+        const workers = JSON.parse(localStorage.getItem('workers')) || [];
+        workers.push({ name, seniorityBonusPercentage });
+        localStorage.setItem('workers', JSON.stringify(workers));
+        document.getElementById('workerName').value = '';
+        document.getElementById('seniorityBonusPercentage').value = '';
+        loadData();
+      } else {
+        alert('Будь ласка, заповніть усі поля коректно! Премія за стаж має бути від 0 до 100%.');
+      }
+    }
+
+    function addPlace() {
+      const name = document.getElementById('placeName').value.trim();
+      const admin = document.getElementById('adminSelect').value;
+      const servicePercentage = parseFloat(document.getElementById('servicePercentage').value) || 0;
+      const salesPlan = parseFloat(document.getElementById('salesPlan').value) || 0;
+      if (name && admin && servicePercentage >= 0 && servicePercentage <= 100 && salesPlan >= 0) {
+        const places = JSON.parse(localStorage.getItem('places')) || [];
+        places.push({ name, admin, servicePercentage, salesPlan });
+        localStorage.setItem('places', JSON.stringify(places));
+        document.getElementById('placeName').value = '';
+        document.getElementById('adminSelect').value = '';
+        document.getElementById('servicePercentage').value = '';
+        document.getElementById('salesPlan').value = '';
+        loadData();
+      } else {
+        alert('Будь ласка, заповніть усі поля коректно! Відсоток має бути від 0 до 100, план продажів ≥ 0.');
+      }
+    }
+
+    function addStats() {
+      const workerIndex = document.getElementById('workerSelect').value;
+      const placeIndex = document.getElementById('placeSelect').value;
+      const date = document.getElementById('statsDate').value;
+      const grossIncome = parseFloat(document.getElementById('grossIncome').value);
+
+      if (workerIndex !== '' && placeIndex !== '' && date && grossIncome >= 0) {
+        const stats = JSON.parse(localStorage.getItem('stats')) || [];
+        stats.push({
+          workerIndex: parseInt(workerIndex),
+          placeIndex: parseInt(placeIndex),
+          date,
+          grossIncome
+        });
+        localStorage.setItem('stats', JSON.stringify(stats));
+        document.getElementById('workerSelect').value = '';
+        document.getElementById('placeSelect').value = '';
+        document.getElementById('statsDate').value = '';
+        document.getElementById('grossIncome').value = '';
+        loadData();
+      } else {
+        alert('Будь ласка, заповніть усі поля коректно!');
+      }
+    }
+
+    function addWorkerBonusPenalty() {
+      const workerIndex = document.getElementById('bonusPenaltyWorkerSelect').value;
+      const date = document.getElementById('bonusPenaltyDate').value;
+      const bonus = parseFloat(document.getElementById('workerBonus').value) || 0;
+      const penalty = parseFloat(document.getElementById('workerPenalty').value) || 0;
+
+      if (workerIndex !== '' && date && (bonus > 0 || penalty > 0)) {
+        const bonusesPenalties = JSON.parse(localStorage.getItem('bonusesPenalties')) || [];
+        bonusesPenalties.push({
+          type: 'worker',
+          workerIndex: parseInt(workerIndex),
+          date,
+          bonus,
+          penalty
+        });
+        localStorage.setItem('bonusesPenalties', JSON.stringify(bonusesPenalties));
+        document.getElementById('bonusPenaltyWorkerSelect').value = '';
+        document.getElementById('bonusPenaltyDate').value = '';
+        document.getElementById('workerBonus').value = '';
+        document.getElementById('workerPenalty').value = '';
+      } else {
+        alert('Будь ласка, заповніть усі поля коректно! Вкажіть дату та хоча б одну суму (премію або штраф).');
+      }
+    }
+
+    function addAdminPenalty() {
+      const admin = document.getElementById('adminPenaltySelect').value;
+      const date = document.getElementById('adminPenaltyDate').value;
+      const penalty = parseFloat(document.getElementById('adminPenaltyAmount').value) || 0;
+
+      if (admin && date && penalty > 0) {
+        const bonusesPenalties = JSON.parse(localStorage.getItem('bonusesPenalties')) || [];
+        bonusesPenalties.push({
+          type: 'admin',
+          admin,
+          date,
+          penalty
+        });
+        localStorage.setItem('bonusesPenalties', JSON.stringify(bonusesPenalties));
+        document.getElementById('adminPenaltySelect').value = '';
+        document.getElementById('adminPenaltyDate').value = '';
+        document.getElementById('adminPenaltyAmount').value = '';
+      } else {
+        alert('Будь ласка, заповніть усі поля коректно! Вкажіть адміністратора, дату та суму штрафу.');
+      }
+    }
+
+    function addPayment() {
+      const workerIndex = document.getElementById('paymentWorkerSelect').value;
+      const admin = document.getElementById('paymentAdminSelect').value;
+      const date = document.getElementById('paymentDate').value;
+      const amount = parseFloat(document.getElementById('paymentAmount').value) || 0;
+
+      if ((workerIndex !== '' || admin) && date && amount > 0) {
+        const payments = JSON.parse(localStorage.getItem('payments')) || [];
+        if (workerIndex !== '') {
+          payments.push({
+            type: 'worker',
+            workerIndex: parseInt(workerIndex),
+            date,
+            amount
+          });
+        } else if (admin) {
+          payments.push({
+            type: 'admin',
+            admin,
+            date,
+            amount
+          });
+        }
+        localStorage.setItem('payments', JSON.stringify(payments));
+        document.getElementById('paymentWorkerSelect').value = '';
+        document.getElementById('paymentAdminSelect').value = '';
+        document.getElementById('paymentDate').value = '';
+        document.getElementById('paymentAmount').value = '';
+        loadData();
+      } else {
+        alert('Будь ласка, заповніть усі поля коректно! Вкажіть робітника або адміністратора, дату та суму.');
+      }
+    }
+
+    function openEditWorkerModal(workerIndex) {
+      currentWorkerIndex = workerIndex;
+      const workers = JSON.parse(localStorage.getItem('workers')) || [];
+      const worker = workers[workerIndex];
+      document.getElementById('editWorkerName').value = worker.name;
+      document.getElementById('editSeniorityBonusPercentage').value = worker.seniorityBonusPercentage || 0;
+      document.getElementById('editWorkerModal').classList.remove('hidden');
+    }
+
+    function saveWorker() {
+      const name = document.getElementById('editWorkerName').value.trim();
+      const seniorityBonusPercentage = parseFloat(document.getElementById('editSeniorityBonusPercentage').value) || 0;
+      if (name && seniorityBonusPercentage >= 0 && seniorityBonusPercentage <= 100) {
+        const workers = JSON.parse(localStorage.getItem('workers')) || [];
+        workers[currentWorkerIndex] = { name, seniorityBonusPercentage };
+        localStorage.setItem('workers', JSON.stringify(workers));
+        closeModal('editWorkerModal');
+        loadData();
+      } else {
+        alert('Будь ласка, заповніть усі поля коректно! Премія за стаж має бути від 0 до 100%.');
+      }
+    }
+
+    function openEditStatsModal(statIndex) {
+      currentStatIndex = statIndex;
+      const stats = JSON.parse(localStorage.getItem('stats')) || [];
+      const stat = stats[statIndex];
+      document.getElementById('editWorkerSelect').value = stat.workerIndex;
+      document.getElementById('editPlaceSelect').value = stat.placeIndex;
+      document.getElementById('editStatsDate').value = stat.date;
+      document.getElementById('editGrossIncome').value = stat.grossIncome;
+      document.getElementById('editStatsModal').classList.remove('hidden');
+    }
+
+    function saveStats() {
+      const workerIndex = document.getElementById('editWorkerSelect').value;
+      const placeIndex = document.getElementById('editPlaceSelect').value;
+      const date = document.getElementById('editStatsDate').value;
+      const grossIncome = parseFloat(document.getElementById('editGrossIncome').value);
+
+      if (workerIndex !== '' && placeIndex !== '' && date && grossIncome >= 0) {
+        const stats = JSON.parse(localStorage.getItem('stats')) || [];
+        stats[currentStatIndex] = {
+          workerIndex: parseInt(workerIndex),
+          placeIndex: parseInt(placeIndex),
+          date,
+          grossIncome
+        };
+        localStorage.setItem('stats', JSON.stringify(stats));
+        closeModal('editStatsModal');
+        loadData();
+      } else {
+        alert('Будь ласка, заповніть усі поля коректно!');
+      }
+    }
+
+    function openEditPlaceModal(placeIndex) {
+      currentPlaceIndex = placeIndex;
+      const places = JSON.parse(localStorage.getItem('places')) || [];
+      const place = places[placeIndex];
+      document.getElementById('editPlaceName').value = place.name;
+      document.getElementById('editAdminSelect').value = place.admin;
+      document.getElementById('editServicePercentage').value = place.servicePercentage || 0;
+      document.getElementById('editSalesPlan').value = place.salesPlan || 0;
+      document.getElementById('editPlaceModal').classList.remove('hidden');
+    }
+
+    function savePlace() {
+      const name = document.getElementById('editPlaceName').value.trim();
+      const admin = document.getElementById('editAdminSelect').value;
+      const servicePercentage = parseFloat(document.getElementById('editServicePercentage').value) || 0;
+      const salesPlan = parseFloat(document.getElementById('editSalesPlan').value) || 0;
+      if (name && admin && servicePercentage >= 0 && servicePercentage <= 100 && salesPlan >= 0) {
+        const places = JSON.parse(localStorage.getItem('places')) || [];
+        places[currentPlaceIndex] = { name, admin, servicePercentage, salesPlan };
+        localStorage.setItem('places', JSON.stringify(places));
+        closeModal('editPlaceModal');
+        loadData();
+      } else {
+        alert('Будь ласка, заповніть усі поля коректно! Відсоток має бути від 0 до 100, план продажів ≥ 0.');
+      }
+    }
+
+    function closeModal(modalId) {
+      document.getElementById(modalId).classList.add('hidden');
+    }
+
+    function deleteStats(statIndex) {
+      if (confirm('Ви впевнені, що хочете видалити цей запис?')) {
+        const stats = JSON.parse(localStorage.getItem('stats')) || [];
+        stats.splice(statIndex, 1);
+        localStorage.setItem('stats', JSON.stringify(stats));
+        loadData();
+      }
+    }
+
+    function deleteWorker(index) {
+      if (confirm('Ви впевнені, що хочете видалити цього робітника? Усі пов’язані записи статистики, премій/штрафів та виплат буде видалено.')) {
+        const workers = JSON.parse(localStorage.getItem('workers')) || [];
+        const stats = JSON.parse(localStorage.getItem('stats')) || [];
+        const bonusesPenalties = JSON.parse(localStorage.getItem('bonusesPenalties')) || [];
+        const payments = JSON.parse(localStorage.getItem('payments')) || [];
+        workers.splice(index, 1);
+        const newStats = stats.filter(stat => stat.workerIndex !== index).map(stat => ({
+          ...stat,
+          workerIndex: stat.workerIndex > index ? stat.workerIndex - 1 : stat.workerIndex
+        }));
+        const newBonusesPenalties = bonusesPenalties.filter(bp => bp.type !== 'worker' || bp.workerIndex !== index).map(bp => ({
+          ...bp,
+          workerIndex: bp.type === 'worker' && bp.workerIndex > index ? bp.workerIndex - 1 : bp.workerIndex
+        }));
+        const newPayments = payments.filter(p => p.type !== 'worker' || p.workerIndex !== index).map(p => ({
+          ...p,
+          workerIndex: p.type === 'worker' && p.workerIndex > index ? p.workerIndex - 1 : p.workerIndex
+        }));
+        localStorage.setItem('workers', JSON.stringify(workers));
+        localStorage.setItem('stats', JSON.stringify(newStats));
+        localStorage.setItem('bonusesPenalties', JSON.stringify(newBonusesPenalties));
+        localStorage.setItem('payments', JSON.stringify(newPayments));
+        loadData();
+      }
+    }
+
+    function deletePlace(index) {
+      if (confirm('Ви впевнені, що хочете видалити цю анкету? Усі пов’язані записи статистики буде видалено.')) {
+        const places = JSON.parse(localStorage.getItem('places')) || [];
+        const stats = JSON.parse(localStorage.getItem('stats')) || [];
+        places.splice(index, 1);
+        const newStats = stats.filter(stat => stat.placeIndex !== index).map(stat => ({
+          ...stat,
+          placeIndex: stat.placeIndex > index ? stat.placeIndex - 1 : stat.placeIndex
+        }));
+        localStorage.setItem('places', JSON.stringify(places));
+        localStorage.setItem('stats', JSON.stringify(newStats));
+        loadData();
+      }
+    }
+
+    function exportToCSV() {
+      const workers = JSON.parse(localStorage.getItem('workers')) || [];
+      const places = JSON.parse(localStorage.getItem('places')) || [];
+      const stats = JSON.parse(localStorage.getItem('stats')) || [];
+      const bonusesPenalties = JSON.parse(localStorage.getItem('bonusesPenalties')) || [];
+      const payments = JSON.parse(localStorage.getItem('payments')) || [];
+      let csvContent = 'ID,Ім\'я робітника,Премія за стаж (%),Анкета,Адміністратор,Відсоток обслуговуючого персоналу (%),План продажів (₴),Дата,Грязний заробіток (₴),Чистий заробіток (₴),Премія за стаж (₴),Видана зарплата (₴),Залишок (₴)\n';
+
+      // Обчислюємо виконання плану продажів для кожного місяця
+      const totalGrossByMonth = {};
+      stats.forEach(stat => {
+        const date = new Date(stat.date);
+        const monthYear = `${date.getFullYear()}-${date.getMonth() + 1}`;
+        totalGrossByMonth[monthYear] = totalGrossByMonth[monthYear] || {};
+        totalGrossByMonth[monthYear][stat.placeIndex] = (totalGrossByMonth[monthYear][stat.placeIndex] || 0) + stat.grossIncome;
+      });
+
+      stats.forEach((stat, index) => {
+        const worker = workers[stat.workerIndex] || { name: 'Невідомий', seniorityBonusPercentage: 0 };
+        const place = places[stat.placeIndex] || { name: 'Невідоме', admin: 'Немає', servicePercentage: 0, salesPlan: 0 };
+        const date = new Date(stat.date);
+        const monthYear = `${date.getFullYear()}-${date.getMonth() + 1}`;
+        const isPlanMet = (totalGrossByMonth[monthYear] && totalGrossByMonth[monthYear][stat.placeIndex] || 0) >= place.salesPlan;
+        const netPercentage = isPlanMet ? 25 : 23;
+        const netIncome = (stat.grossIncome * netPercentage / 100).toFixed(2);
+        const seniorityBonus = (stat.grossIncome * worker.seniorityBonusPercentage / 100).toFixed(2);
+        const workerPayments = payments
+          .filter(p => p.type === 'worker' && p.workerIndex === stat.workerIndex && p.date === stat.date)
+          .reduce((sum, p) => sum + p.amount, 0).toFixed(2);
+        const workerBalance = (parseFloat(netIncome) + parseFloat(seniorityBonus) - workerPayments).toFixed(2);
+        csvContent += `${index + 1},${worker.name},${worker.seniorityBonusPercentage},${place.name},${place.admin},${place.servicePercentage},${place.salesPlan},${stat.date},${stat.grossIncome},${netIncome},${seniorityBonus},${workerPayments},${workerBalance}\n`;
+      });
+
+      csvContent += '\nПремії/штрафи працівників:\nID,Робітник,Дата,Премія (₴),Штраф (₴)\n';
+      bonusesPenalties.filter(bp => bp.type === 'worker').forEach((bp, index) => {
+        const worker = workers[bp.workerIndex] || { name: 'Невідомий' };
+        csvContent += `${index + 1},${worker.name},${bp.date},${bp.bonus || 0},${bp.penalty || 0}\n`;
+      });
+
+      csvContent += '\nШтрафи адміністраторів:\nID,Адміністратор,Дата,Штраф (₴)\n';
+      bonusesPenalties.filter(bp => bp.type === 'admin').forEach((bp, index) => {
+        csvContent += `${index + 1},${bp.admin},${bp.date},${bp.penalty || 0}\n`;
+      });
+
+      csvContent += '\nВидача зарплати:\nID,Тип,Ім\'я,Дата,Сума (₴)\n';
+      payments.forEach((p, index) => {
+        const name = p.type === 'worker' ? (workers[p.workerIndex] || { name: 'Невідомий' }).name : p.admin;
+        csvContent += `${index + 1},${p.type === 'worker' ? 'Робітник' : 'Адміністратор'},${name},${p.date},${p.amount}\n`;
+      });
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'daily_stats.csv';
+      link.click();
+    }
+
+    loadData();
+  </script>
+</body>
+</html>

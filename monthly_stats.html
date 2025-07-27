@@ -1,0 +1,323 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Місячна статистика за адміністраторами</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+  <div class="container mx-auto p-6">
+    <h1 class="text-3xl font-bold mb-6 text-center">Місячна статистика за адміністраторами</h1>
+
+    <nav class="mb-6">
+      <a href="index.html" class="text-blue-500 hover:underline mr-4">Щоденна статистика</a>
+      <a href="monthly_stats.html" class="text-blue-500 hover:underline">Місячна статистика</a>
+    </nav>
+
+    <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+      <h2 class="text-xl font-semibold mb-4">Місячна статистика за адміністраторами</h2>
+      <div class="flex flex-col gap-4 mb-4">
+        <select id="monthSelect" class="p-2 border rounded">
+          <option value="1">Січень</option>
+          <option value="2">Лютий</option>
+          <option value="3">Березень</option>
+          <option value="4">Квітень</option>
+          <option value="5">Травень</option>
+          <option value="6">Червень</option>
+          <option value="7">Липень</option>
+          <option value="8">Серпень</option>
+          <option value="9">Вересень</option>
+          <option value="10">Жовтень</option>
+          <option value="11">Листопад</option>
+          <option value="12">Грудень</option>
+        </select>
+        <input id="yearSelect" type="number" placeholder="Рік" class="p-2 border rounded" value="2025">
+        <button onclick="loadMonthlyStats()" class="bg-blue-500 text-white p-2 rounded hover:bg-blue-600">Показати статистику</button>
+      </div>
+      <button onclick="exportMonthlyToCSV()" class="bg-green-500 text-white p-2 rounded mb-4 hover:bg-green-600">Експортувати місячну статистику в CSV</button>
+      <div id="monthlyStatsTables"></div>
+    </div>
+  </div>
+
+  <script>
+    function loadMonthlyStats() {
+      const month = parseInt(document.getElementById('monthSelect').value);
+      const year = parseInt(document.getElementById('yearSelect').value);
+      const workers = JSON.parse(localStorage.getItem('workers')) || [];
+      const places = JSON.parse(localStorage.getItem('places')) || [];
+      const stats = JSON.parse(localStorage.getItem('stats')) || [];
+      const bonusesPenalties = JSON.parse(localStorage.getItem('bonusesPenalties')) || [];
+      const payments = JSON.parse(localStorage.getItem('payments')) || [];
+      const monthlyStatsTables = document.getElementById('monthlyStatsTables');
+      monthlyStatsTables.innerHTML = '';
+
+      if (!workers.length || !places.length || !stats.length) {
+        monthlyStatsTables.innerHTML = '<p class="text-red-500">Немає даних для відображення. Додайте робітників, анкети та статистику в щоденній статистиці.</p>';
+        return;
+      }
+
+      // Групування анкет за адміністратором
+      const admins = [...new Set(places.map(place => place.admin).filter(admin => admin))];
+      if (admins.length === 0) {
+        monthlyStatsTables.innerHTML = '<p class="text-red-500">Немає адміністраторів для відображення.</p>';
+        return;
+      }
+
+      admins.forEach(admin => {
+        const adminPlaces = places.filter(place => place.admin === admin);
+        const adminContainer = document.createElement('div');
+        adminContainer.className = 'mb-8';
+        adminContainer.innerHTML = `<h2 class="text-2xl font-semibold mb-4">Адміністратор: ${admin}</h2>`;
+
+        let hasData = false;
+
+        adminPlaces.forEach((place, placeIndex) => {
+          const placeStats = stats.filter(stat => {
+            const statDate = new Date(stat.date);
+            return stat.placeIndex === placeIndex && statDate.getMonth() + 1 === month && statDate.getFullYear() === year;
+          });
+
+          const workerIndices = [...new Set(placeStats.map(stat => stat.workerIndex))];
+          if (workerIndices.length === 0) return;
+
+          hasData = true;
+
+          const totalGross = placeStats.reduce((sum, stat) => sum + stat.grossIncome, 0);
+          const isPlanMet = totalGross >= (place.salesPlan || 0);
+          const netPercentage = isPlanMet ? 25 : 23;
+          const totalNet = placeStats.reduce((sum, stat) => sum + (stat.grossIncome * netPercentage / 100), 0);
+          const totalWorkerBonuses = bonusesPenalties
+            .filter(bp => bp.type === 'worker' && workerIndices.includes(bp.workerIndex) && new Date(bp.date).getMonth() + 1 === month && new Date(bp.date).getFullYear() === year)
+            .reduce((sum, bp) => sum + (bp.bonus || 0), 0);
+          const totalWorkerPenalties = bonusesPenalties
+            .filter(bp => bp.type === 'worker' && workerIndices.includes(bp.workerIndex) && new Date(bp.date).getMonth() + 1 === month && new Date(bp.date).getFullYear() === year)
+            .reduce((sum, bp) => sum + (bp.penalty || 0), 0);
+          const totalAdminPenalties = bonusesPenalties
+            .filter(bp => bp.type === 'admin' && bp.admin === place.admin && new Date(bp.date).getMonth() + 1 === month && new Date(bp.date).getFullYear() === year)
+            .reduce((sum, bp) => sum + (bp.penalty || 0), 0);
+          const adminIncome = (totalGross * 0.06).toFixed(2);
+          const adminPayments = payments
+            .filter(p => p.type === 'admin' && p.admin === place.admin && new Date(p.date).getMonth() + 1 === month && new Date(p.date).getFullYear() === year)
+            .reduce((sum, p) => sum + p.amount, 0).toFixed(2);
+          const adminBalance = (parseFloat(adminIncome) - totalAdminPenalties - adminPayments).toFixed(2);
+          const serviceIncome = (totalGross * (place.servicePercentage || 0) / 100).toFixed(2);
+          const totalSeniorityBonuses = workerIndices.reduce((sum, workerIndex) => {
+            const workerStats = placeStats.filter(stat => stat.workerIndex === workerIndex);
+            const workerGross = workerStats.reduce((sum, stat) => sum + stat.grossIncome, 0);
+            const worker = workers[workerIndex] || { seniorityBonusPercentage: 0 };
+            return sum + (workerGross * (worker.seniorityBonusPercentage || 0) / 100);
+          }, 0).toFixed(2);
+          const ownerIncome = (totalGross - totalNet - adminIncome - serviceIncome - totalWorkerBonuses + totalWorkerPenalties + totalAdminPenalties - totalSeniorityBonuses).toFixed(2);
+
+          const tableContainer = document.createElement('div');
+          tableContainer.className = 'mb-6';
+          tableContainer.innerHTML = `
+            <h3 class="text-lg font-semibold mb-2">Анкета: ${place.name} (Відсоток обслуговуючого персоналу: ${place.servicePercentage || 0}%, План продажів: ${place.salesPlan || 0} ₴)</h3>
+            <p>Грязний дохід: ${totalGross.toFixed(2)} ₴ | План виконано: ${isPlanMet ? 'Так' : 'Ні'} | Відсоток чистого доходу: ${netPercentage}%</p>
+            <p>Заробіток адміна: ${adminIncome} ₴ | Штрафи адміна: ${totalAdminPenalties} ₴ | Видана зарплата адміна: ${adminPayments} ₴ | Залишок адміна: ${adminBalance} ₴</p>
+            <p>Заробіток обслуговуючого персоналу: ${serviceIncome} ₴ | Премії за стаж: ${totalSeniorityBonuses} ₴ | Заробіток власника: ${ownerIncome} ₴</p>`;
+          const table = document.createElement('table');
+          table.className = 'w-full border-collapse';
+          const thead = document.createElement('thead');
+          const tbody = document.createElement('tbody');
+
+          let headerRow = '<tr class="bg-gray-200"><th class="p-2 border">Робітник</th><th class="p-2 border">Грязний заробіток (₴)</th><th class="p-2 border">Чистий заробіток (₴)</th><th class="p-2 border">Премія за стаж (₴)</th><th class="p-2 border">Премія (₴)</th><th class="p-2 border">Штраф (₴)</th><th class="p-2 border">Видана зарплата (₴)</th><th class="p-2 border">Залишок (₴)</th></tr>';
+          thead.innerHTML = headerRow;
+
+          let workerTotalGross = 0;
+          let workerTotalNet = 0;
+          let workerTotalSeniority = 0;
+          let workerTotalBonuses = 0;
+          let workerTotalPenalties = 0;
+          let workerTotalPayments = 0;
+          let workerTotalBalance = 0;
+
+          workerIndices.forEach(workerIndex => {
+            const workerStats = placeStats.filter(stat => stat.workerIndex === workerIndex);
+            const workerGross = workerStats.reduce((sum, stat) => sum + stat.grossIncome, 0).toFixed(2);
+            const workerNet = workerStats.reduce((sum, stat) => sum + (stat.grossIncome * netPercentage / 100), 0).toFixed(2);
+            const worker = workers[workerIndex] || { name: 'Невідомий', seniorityBonusPercentage: 0 };
+            const seniorityBonus = (workerGross * worker.seniorityBonusPercentage / 100).toFixed(2);
+            const workerBonuses = bonusesPenalties
+              .filter(bp => bp.type === 'worker' && bp.workerIndex === workerIndex && new Date(bp.date).getMonth() + 1 === month && new Date(bp.date).getFullYear() === year)
+              .reduce((sum, bp) => sum + (bp.bonus || 0), 0).toFixed(2);
+            const workerPenalties = bonusesPenalties
+              .filter(bp => bp.type === 'worker' && bp.workerIndex === workerIndex && new Date(bp.date).getMonth() + 1 === month && new Date(bp.date).getFullYear() === year)
+              .reduce((sum, bp) => sum + (bp.penalty || 0), 0).toFixed(2);
+            const workerPayments = payments
+              .filter(p => p.type === 'worker' && p.workerIndex === workerIndex && new Date(p.date).getMonth() + 1 === month && new Date(p.date).getFullYear() === year)
+              .reduce((sum, p) => sum + p.amount, 0).toFixed(2);
+            const workerBalance = (parseFloat(workerNet) + parseFloat(seniorityBonus) + parseFloat(workerBonuses) - parseFloat(workerPenalties) - parseFloat(workerPayments)).toFixed(2);
+
+            workerTotalGross += parseFloat(workerGross);
+            workerTotalNet += parseFloat(workerNet);
+            workerTotalSeniority += parseFloat(seniorityBonus);
+            workerTotalBonuses += parseFloat(workerBonuses);
+            workerTotalPenalties += parseFloat(workerPenalties);
+            workerTotalPayments += parseFloat(workerPayments);
+            workerTotalBalance += parseFloat(workerBalance);
+
+            const row = document.createElement('tr');
+            row.innerHTML = `
+              <td class="p-2 border">${worker.name}</td>
+              <td class="p-2 border">${workerGross}</td>
+              <td class="p-2 border">${workerNet}</td>
+              <td class="p-2 border">${seniorityBonus}</td>
+              <td class="p-2 border">${workerBonuses}</td>
+              <td class="p-2 border">${workerPenalties}</td>
+              <td class="p-2 border">${workerPayments}</td>
+              <td class="p-2 border">${workerBalance}</td>`;
+            tbody.appendChild(row);
+          });
+
+          const totalRow = document.createElement('tr');
+          totalRow.className = 'bg-gray-100 font-bold';
+          totalRow.innerHTML = `
+            <td class="p-2 border">Всього</td>
+            <td class="p-2 border">${workerTotalGross.toFixed(2)}</td>
+            <td class="p-2 border">${workerTotalNet.toFixed(2)}</td>
+            <td class="p-2 border">${workerTotalSeniority.toFixed(2)}</td>
+            <td class="p-2 border">${workerTotalBonuses.toFixed(2)}</td>
+            <td class="p-2 border">${workerTotalPenalties.toFixed(2)}</td>
+            <td class="p-2 border">${workerTotalPayments.toFixed(2)}</td>
+            <td class="p-2 border">${workerTotalBalance.toFixed(2)}</td>`;
+          tbody.appendChild(totalRow);
+
+          table.appendChild(thead);
+          table.appendChild(tbody);
+          tableContainer.appendChild(table);
+          adminContainer.appendChild(tableContainer);
+        });
+
+        if (hasData) {
+          monthlyStatsTables.appendChild(adminContainer);
+        }
+      });
+
+      if (!monthlyStatsTables.children.length) {
+        monthlyStatsTables.innerHTML = '<p class="text-red-500">Немає статистики для обраного місяця та року.</p>';
+      }
+    }
+
+    function exportMonthlyToCSV() {
+      const month = parseInt(document.getElementById('monthSelect').value);
+      const year = parseInt(document.getElementById('yearSelect').value);
+      const workers = JSON.parse(localStorage.getItem('workers')) || [];
+      const places = JSON.parse(localStorage.getItem('places')) || [];
+      const stats = JSON.parse(localStorage.getItem('stats')) || [];
+      const bonusesPenalties = JSON.parse(localStorage.getItem('bonusesPenalties')) || [];
+      const payments = JSON.parse(localStorage.getItem('payments')) || [];
+      let csvContent = 'Адміністратор,Анкета,Відсоток обслуговуючого персоналу (%),План продажів (₴),Робітник,Грязний заробіток (₴),Чистий заробіток (₴),Премія за стаж (₴),Премія працівника (₴),Штраф працівника (₴),Видана зарплата працівника (₴),Залишок працівника (₴),Заробіток адміна (₴),Штраф адміна (₴),Видана зарплата адміна (₴),Залишок адміна (₴),Заробіток обслуговуючого персоналу (₴),Заробіток власника (₴)\n';
+
+      const admins = [...new Set(places.map(place => place.admin).filter(admin => admin))];
+      admins.forEach(admin => {
+        const adminPlaces = places.filter(place => place.admin === admin);
+        adminPlaces.forEach((place, placeIndex) => {
+          const placeStats = stats.filter(stat => {
+            const statDate = new Date(stat.date);
+            return stat.placeIndex === placeIndex && statDate.getMonth() + 1 === month && statDate.getFullYear() === year;
+          });
+
+          const workerIndices = [...new Set(placeStats.map(stat => stat.workerIndex))];
+          const totalGross = placeStats.reduce((sum, stat) => sum + stat.grossIncome, 0);
+          const isPlanMet = totalGross >= (place.salesPlan || 0);
+          const netPercentage = isPlanMet ? 25 : 23;
+          const totalNet = placeStats.reduce((sum, stat) => sum + (stat.grossIncome * netPercentage / 100), 0);
+          const totalWorkerBonuses = bonusesPenalties
+            .filter(bp => bp.type === 'worker' && workerIndices.includes(bp.workerIndex) && new Date(bp.date).getMonth() + 1 === month && new Date(bp.date).getFullYear() === year)
+            .reduce((sum, bp) => sum + (bp.bonus || 0), 0);
+          const totalWorkerPenalties = bonusesPenalties
+            .filter(bp => bp.type === 'worker' && workerIndices.includes(bp.workerIndex) && new Date(bp.date).getMonth() + 1 === month && new Date(bp.date).getFullYear() === year)
+            .reduce((sum, bp) => sum + (bp.penalty || 0), 0);
+          const totalAdminPenalties = bonusesPenalties
+            .filter(bp => bp.type === 'admin' && bp.admin === place.admin && new Date(bp.date).getMonth() + 1 === month && new Date(bp.date).getFullYear() === year)
+            .reduce((sum, bp) => sum + (bp.penalty || 0), 0);
+          const adminIncome = (totalGross * 0.06).toFixed(2);
+          const adminPayments = payments
+            .filter(p => p.type === 'admin' && p.admin === place.admin && new Date(p.date).getMonth() + 1 === month && new Date(p.date).getFullYear() === year)
+            .reduce((sum, p) => sum + p.amount, 0).toFixed(2);
+          const adminBalance = (parseFloat(adminIncome) - totalAdminPenalties - adminPayments).toFixed(2);
+          const serviceIncome = (totalGross * (place.servicePercentage || 0) / 100).toFixed(2);
+          const totalSeniorityBonuses = workerIndices.reduce((sum, workerIndex) => {
+            const workerStats = placeStats.filter(stat => stat.workerIndex === workerIndex);
+            const workerGross = workerStats.reduce((sum, stat) => sum + stat.grossIncome, 0);
+            const worker = workers[workerIndex] || { seniorityBonusPercentage: 0 };
+            return sum + (workerGross * (worker.seniorityBonusPercentage || 0) / 100);
+          }, 0).toFixed(2);
+          const ownerIncome = (totalGross - totalNet - adminIncome - serviceIncome - totalWorkerBonuses + totalWorkerPenalties + totalAdminPenalties - totalSeniorityBonuses).toFixed(2);
+
+          workerIndices.forEach(workerIndex => {
+            const workerStats = placeStats.filter(stat => stat.workerIndex === workerIndex);
+            const workerGross = workerStats.reduce((sum, stat) => sum + stat.grossIncome, 0).toFixed(2);
+            const workerNet = workerStats.reduce((sum, stat) => sum + (stat.grossIncome * netPercentage / 100), 0).toFixed(2);
+            const worker = workers[workerIndex] || { name: 'Невідомий', seniorityBonusPercentage: 0 };
+            const seniorityBonus = (workerGross * worker.seniorityBonusPercentage / 100).toFixed(2);
+            const workerBonuses = bonusesPenalties
+              .filter(bp => bp.type === 'worker' && bp.workerIndex === workerIndex && new Date(bp.date).getMonth() + 1 === month && new Date(bp.date).getFullYear() === year)
+              .reduce((sum, bp) => sum + (bp.bonus || 0), 0).toFixed(2);
+            const workerPenalties = bonusesPenalties
+              .filter(bp => bp.type === 'worker' && bp.workerIndex === workerIndex && new Date(bp.date).getMonth() + 1 === month && new Date(bp.date).getFullYear() === year)
+              .reduce((sum, bp) => sum + (bp.penalty || 0), 0).toFixed(2);
+            const workerPayments = payments
+              .filter(p => p.type === 'worker' && p.workerIndex === workerIndex && new Date(p.date).getMonth() + 1 === month && new Date(p.date).getFullYear() === year)
+              .reduce((sum, p) => sum + p.amount, 0).toFixed(2);
+            const workerBalance = (parseFloat(workerNet) + parseFloat(seniorityBonus) + parseFloat(workerBonuses) - parseFloat(workerPenalties) - parseFloat(workerPayments)).toFixed(2);
+
+            csvContent += `${place.admin || 'Немає'},${place.name},${place.servicePercentage || 0},${place.salesPlan || 0},${worker.name},${workerGross},${workerNet},${seniorityBonus},${workerBonuses},${workerPenalties},${workerPayments},${workerBalance},${adminIncome},${totalAdminPenalties},${adminPayments},${adminBalance},${serviceIncome},${ownerIncome}\n`;
+          });
+        });
+      });
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `monthly_stats_${year}_${month}.csv`;
+      link.click();
+    }
+
+    document.getElementById('monthSelect').value = new Date().getMonth() + 1;
+    document.getElementById('yearSelect').value = new Date().getFullYear();
+    loadMonthlyStats();
+  </script>
+</body>
+</html>
